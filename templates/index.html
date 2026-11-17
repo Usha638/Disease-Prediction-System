@@ -1,103 +1,158 @@
+
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>Disease Prediction System</title>
 
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: Arial, sans-serif;
-            background: linear-gradient(120deg, #d4fcf9, #a1c4fd);
+            background: #f0f4f8;
             margin: 0;
-            padding: 30px;
+            color: #263238;
+        }
+
+        header {
+            background: #176b87;
+            color: white;
+            padding: 22px;
+            text-align: center;
+        }
+
+        nav {
+            background: #064663;
+            padding: 14px;
+            text-align: right;
+        }
+
+        nav a {
+            color: white;
+            text-decoration: none;
+            margin: 0 12px;
+            font-weight: bold;
         }
 
         .container {
+            width: 90%;
+            max-width: 1000px;
+            margin: 30px auto;
+        }
+
+        .card {
             background: white;
-            max-width: 850px;
-            margin: auto;
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+            padding: 25px;
+            margin-bottom: 25px;
+            border-radius: 12px;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.08);
         }
 
-        h1 {
+        h2 {
             color: #176b87;
-            text-align: center;
         }
 
-        p {
-            text-align: center;
-            color: #555;
-        }
-
-        input[type="text"] {
-            width: 95%;
-            padding: 12px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            margin: 15px 0;
+        #search {
+            width: 100%;
+            padding: 13px;
+            border: 1px solid #bbb;
+            border-radius: 7px;
+            margin: 10px 0 20px;
+            font-size: 16px;
         }
 
         .symptoms {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 12px;
-            margin: 20px 0;
-            max-height: 300px;
+            max-height: 350px;
             overflow-y: auto;
-            padding: 15px;
-        }
-
-        label {
-            background: #f0f8ff;
             padding: 10px;
-            border-radius: 6px;
         }
 
-        label:hover {
-            background: #d6eaf8;
+        .symptom-item {
+            background: #f1f7fa;
+            padding: 12px;
+            border-radius: 7px;
+            cursor: pointer;
+        }
+
+        .symptom-item input {
+            margin-right: 8px;
         }
 
         button {
-            padding: 12px 25px;
+            background: #176b87;
+            color: white;
             border: none;
-            border-radius: 8px;
+            padding: 13px 25px;
+            border-radius: 7px;
             cursor: pointer;
             font-size: 16px;
-            margin: 8px;
-        }
-
-        .predict {
-            background: #168aad;
-            color: white;
-        }
-
-        .reset {
-            background: #e76f51;
-            color: white;
+            margin-top: 15px;
         }
 
         button:hover {
-            opacity: 0.85;
+            background: #064663;
+        }
+
+        .reset-btn {
+            background: #777;
+        }
+
+        .error {
+            color: red;
+            font-weight: bold;
         }
 
         .result {
-            background: #e8f8f5;
-            padding: 15px;
+            background: #e8f5e9;
+            padding: 20px;
+            border-left: 5px solid #2e8b57;
             border-radius: 8px;
             margin-top: 20px;
-            text-align: center;
-            color: #117864;
         }
 
-        .warning {
-            font-size: 12px;
-            margin-top: 20px;
+        .info-section {
+            background: #f8fbfd;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            border-left: 4px solid #176b87;
+        }
+
+        .info-section h3 {
+            color: #176b87;
+            margin-top: 0;
+        }
+
+        .info-section p {
+            line-height: 1.7;
+        }
+
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #666;
         }
 
         @media(max-width: 600px) {
-            .symptoms {
-                grid-template-columns: 1fr;
+            nav {
+                text-align: center;
+            }
+
+            nav a {
+                display: inline-block;
+                margin: 7px;
+            }
+
+            .container {
+                width: 95%;
             }
         }
     </style>
@@ -105,98 +160,185 @@
 
 <body>
 
+<header>
+    <h1>Disease Prediction System</h1>
+    <p>Machine Learning Based Health Prediction</p>
+</header>
+
+<nav>
+    <span style="color:white;">
+        Welcome, {{ username }}
+    </span>
+    <a href="/history">History</a>
+    <a href="/logout">Logout</a>
+</nav>
+
 <div class="container">
 
-    <h1>🏥 Disease Prediction System</h1>
+    <div class="card">
 
-    <p>Select your symptoms to predict a possible disease.</p>
+        <h2>Select Your Symptoms</h2>
 
-    <input type="text" id="search"
-           placeholder="Search symptoms..."
-           onkeyup="searchSymptoms()">
+        <p>Select the symptoms you are experiencing.</p>
 
-    <form action="/predict" method="POST">
+        {% if error %}
+            <p class="error">{{ error }}</p>
+        {% endif %}
 
-        <div class="symptoms">
+        <form action="/predict" method="POST">
 
-            {% for symptom in symptoms %}
+            <input
+                type="text"
+                id="search"
+                placeholder="Search symptoms..."
+                onkeyup="searchSymptoms()"
+            >
 
-            <label class="symptom-item">
+            <div class="symptoms" id="symptomList">
 
-                <input type="checkbox"
-                       name="symptoms"
-                       value="{{ symptom }}">
+                {% for symptom in symptoms %}
 
-                {{ symptom.replace('_', ' ') }}
+                <label class="symptom-item">
+                    <input
+                        type="checkbox"
+                        name="symptoms"
+                        value="{{ symptom }}"
+                    >
+                    {{ symptom.replace('_', ' ').title() }}
+                </label>
 
-            </label>
+                {% endfor %}
 
-            {% endfor %}
+            </div>
 
-        </div>
-
-        <center>
-
-            <button type="submit" class="predict">
+            <button type="submit">
                 Predict Disease
             </button>
 
-            <button type="reset" class="reset">
+            <button type="reset" class="reset-btn">
                 Reset
             </button>
 
-        </center>
+        </form>
 
-    </form>
-
-    <!-- Error Message -->
-
-    {% if error %}
-
-    <div class="result">
-        <p>{{ error }}</p>
     </div>
 
-    {% endif %}
-
-    <!-- Prediction Result -->
 
     {% if prediction %}
 
-    <div class="result">
+    <div class="card">
 
-        <h3>Prediction Result</h3>
+        <h2>Prediction Result</h2>
 
-        <h2>{{ prediction }}</h2>
+        <div class="result">
 
-        <p>Please consult a qualified healthcare professional.
-        This result is not a medical diagnosis.</p>
+            <h3>Predicted Disease:</h3>
+
+            <h2>{{ prediction.replace('_', ' ') }}</h2>
+
+            <p>
+                Based on the symptoms you selected,
+                the machine learning model predicted this disease.
+            </p>
+
+        </div>
+
+        <h2>Disease Information</h2>
+
+        {% if disease_info %}
+
+            {% if disease_info.overview %}
+            <div class="info-section">
+                <h3>Overview</h3>
+                <p>{{ disease_info.overview }}</p>
+            </div>
+            {% endif %}
+
+            {% if disease_info.causes %}
+            <div class="info-section">
+                <h3>Causes</h3>
+                <p>{{ disease_info.causes }}</p>
+            </div>
+            {% endif %}
+
+            {% if disease_info.symptoms %}
+            <div class="info-section">
+                <h3>Symptoms</h3>
+                <p>{{ disease_info.symptoms }}</p>
+            </div>
+            {% endif %}
+
+            {% if disease_info.risk_factors %}
+            <div class="info-section">
+                <h3>Risk Factors</h3>
+                <p>{{ disease_info.risk_factors }}</p>
+            </div>
+            {% endif %}
+
+            {% if disease_info.precautions %}
+            <div class="info-section">
+                <h3>Precautions</h3>
+                <p>{{ disease_info.precautions }}</p>
+            </div>
+            {% endif %}
+
+            {% if disease_info.prevention %}
+            <div class="info-section">
+                <h3>Prevention</h3>
+                <p>{{ disease_info.prevention }}</p>
+            </div>
+            {% endif %}
+
+            {% if disease_info.doctor %}
+            <div class="info-section">
+                <h3>When to Consult a Doctor</h3>
+                <p>{{ disease_info.doctor }}</p>
+            </div>
+            {% endif %}
+
+        {% else %}
+
+            <p>Disease information is not available.</p>
+
+        {% endif %}
+
+        <p style="color:#b45309;">
+            <strong>Medical Disclaimer:</strong>
+            This prediction is for educational purposes only.
+            It is not a medical diagnosis. Consult a qualified
+            healthcare professional for medical advice.
+        </p>
 
     </div>
 
     {% endif %}
 
-    <p class="warning">
-        Note: This system is developed for educational purposes only.
-        It does not provide medical diagnosis.
-    </p>
-
 </div>
+
+<footer>
+    <p>Disease Prediction Using Machine Learning</p>
+    <p>Academic Mini Project</p>
+</footer>
+
 
 <script>
 
 function searchSymptoms() {
 
-    let input = document.getElementById("search").value.toLowerCase();
+    let input = document.getElementById("search");
+    let filter = input.value.toLowerCase();
 
     let symptoms = document.getElementsByClassName("symptom-item");
 
     for (let i = 0; i < symptoms.length; i++) {
 
-        let text = symptoms[i].innerText.toLowerCase();
+        let text = symptoms[i].textContent.toLowerCase();
 
-        symptoms[i].style.display =
-            text.includes(input) ? "block" : "none";
+        if (text.includes(filter)) {
+            symptoms[i].style.display = "block";
+        } else {
+            symptoms[i].style.display = "none";
+        }
 
     }
 
