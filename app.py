@@ -1,34 +1,40 @@
-
-
-from flask import Flask, render_template, request, redirect, url_for, session
+import streamlit as st
 import pandas as pd
 import joblib
 import sqlite3
+import hashlib
 import os
-
-from werkzeug.security import generate_password_hash, check_password_hash
-from functools import wraps
 from datetime import datetime
-
-# Import disease information
+from pathlib import Path
 from disease_info import get_disease_info
 
+# ---------------- PAGE CONFIGURATION ----------------
 
-app = Flask(__name__)
-app.secret_key = "change-this-to-a-long-random-secret"
+st.set_page_config(
+    page_title="Disease Prediction System",
+    page_icon="🩺",
+    layout="wide"
+)
 
-# Create database folder
-os.makedirs("database", exist_ok=True)
+# ---------------- FILE PATHS ----------------
 
+BASE_DIR = Path(__file__).resolve().parent
 
-# Database connection
+DATASET_PATH = BASE_DIR / "dataset" / "Training.csv"
+MODEL_PATH = BASE_DIR / "model" / "disease_model.pkl"
+DATABASE_DIR = BASE_DIR / "database"
+DATABASE_PATH = DATABASE_DIR / "users.db"
+
+DATABASE_DIR.mkdir(exist_ok=True)
+
+# ---------------- DATABASE ----------------
+
 def get_db():
-    conn = sqlite3.connect("database/users.db")
+    conn = sqlite3.connect(str(DATABASE_PATH))
     conn.row_factory = sqlite3.Row
     return conn
 
 
-# Create database tables
 def create_tables():
     conn = get_db()
 
@@ -59,189 +65,273 @@ def create_tables():
 create_tables()
 
 
-# Load machine learning model
-model = joblib.load("model/disease_model.pkl")
+# ---------------- PASSWORD SECURITY ----------------
 
-# Load dataset
-data = pd.read_csv("dataset/Training.csv")
-
-# Remove unwanted columns
-data = data.loc[:, ~data.columns.str.contains("^Unnamed")]
-
-# Get symptom names
-symptoms = list(data.drop("prognosis", axis=1).columns)
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
 
-# Login required decorator
-def login_required(route):
-    @wraps(route)
-    def wrapper(*args, **kwargs):
-        if "user_id" not in session:
-            return redirect(url_for("login"))
+# ---------------- LOAD MODEL AND DATASET ----------------
 
-        return route(*args, **kwargs)
-
-    return wrapper
+@st.cache_resource
+def load_model():
+    return joblib.load(MODEL_PATH)
 
 
-# Home page
-@app.route("/")
-@login_required
-def home():
-    return render_template(
-        "index.html",
-        symptoms=symptoms,
-        username=session["username"]
-    )
+@st.cache_data
+def load_dataset():
+    df = pd.read_csv(DATASET_PATH)
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
+
+    if "prognosis" not in df.columns:
+        raise ValueError("The dataset must contain a 'prognosis' column.")
+
+    return df
 
 
-# Registration
-@app.route("/register", methods=["GET", "POST"])
-def register():
+try:
+    model = load_model()
+    data = load_dataset()
 
-    if request.method == "POST":
+    symptoms = list(data.drop("prognosis", axis=1).columns)
 
-        username = request.form["username"].strip()
-        email = request.form["email"].strip()
-        password = request.form["password"]
+    # Keep the same feature order used when training the model.
+    if hasattr(model, "feature_names_in_"):
+        symptoms = list(model.feature_names_in_)
+
+except Exception as e:
+    st.error("Unable to load the model or dataset.")
+    st.write("Please check that these files are uploaded to GitHub:")
+    st.code("dataset/Training.csv\nmodel/disease_model.pkl")
+    st.write("Error details:", str(e))
+    st.stop()
+
+
+# ---------------- SESSION STATE ----------------
+
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+
+if "username" not in st.session_state:
+    st.session_state.username = None
+
+
+# ---------------- REGISTRATION ----------------
+
+def register_user():
+    st.title("📝 Create Your Account")
+    st.write("Register to use the Disease Prediction System.")
+
+    with st.form("register_form"):
+        username = st.text_input("Username")
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        confirm_password = st.text_input(
+            "Confirm Password",
+            type="password"
+        )
+
+        submitted = st.form_submit_button("Register")
+
+    if submitted:
+        username = username.strip()
+        email = email.strip()
 
         if not username or not email or not password:
-            return "Please fill all fields."
+            st.error("Please fill in all fields.")
 
-        hashed_password = generate_password_hash(password)
+        elif password != confirm_password:
+            st.error("Passwords do not match.")
 
-        conn = get_db()
+        elif len(password) < 6:
+            st.error("Password must contain at least 6 characters.")
 
-        try:
-            conn.execute(
-                """
-                INSERT INTO users (username, email, password)
-                VALUES (?, ?, ?)
-                """,
-                (username, email, hashed_password)
-            )
+        else:
+            conn = get_db()
 
-            conn.commit()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO users (username, email, password)
+                    VALUES (?, ?, ?)
+                    """,
+                    (username, email, hash_password(password))
+                )
 
-        except sqlite3.IntegrityError:
-            conn.close()
-            return "Username or email already exists."
+                conn.commit()
+                st.success("Registration successful! Please log in.")
 
-        conn.close()
+            except sqlite3.IntegrityError:
+                st.error("Username or email already exists.")
 
-        return redirect(url_for("login"))
+            finally:
+                conn.close()
 
-    return render_template("register.html")
 
+# ---------------- LOGIN ----------------
 
-# Login
-@app.route("/login", methods=["GET", "POST"])
-def login():
+def login_user():
+    st.title("🔐 User Login")
+    st.write("Login to access the Disease Prediction System.")
 
-    if request.method == "POST":
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
 
-        username = request.form["username"].strip()
-        password = request.form["password"]
+        submitted = st.form_submit_button("Login")
 
+    if submitted:
         conn = get_db()
 
         user = conn.execute(
             "SELECT * FROM users WHERE username = ?",
-            (username,)
+            (username.strip(),)
         ).fetchone()
 
         conn.close()
 
-        if user and check_password_hash(user["password"], password):
+        if user and user["password"] == hash_password(password):
+            st.session_state.user_id = user["id"]
+            st.session_state.username = user["username"]
 
-            session.clear()
-            session["user_id"] = user["id"]
-            session["username"] = user["username"]
+            st.success("Login successful!")
+            st.rerun()
 
-            return redirect(url_for("home"))
-
-        return render_template(
-            "login.html",
-            error="Invalid username or password."
-        )
-
-    return render_template("login.html")
+        else:
+            st.error("Invalid username or password.")
 
 
-# Logout
-@app.route("/logout")
-@login_required
-def logout():
+# ---------------- HOME / DISEASE PREDICTION ----------------
 
-    session.clear()
+def prediction_page():
+    st.title("🩺 Disease Prediction System")
 
-    return redirect(url_for("login"))
-
-
-# Disease prediction
-@app.route("/predict", methods=["POST"])
-@login_required
-def predict():
-
-    selected_symptoms = request.form.getlist("symptoms")
-
-    if not selected_symptoms:
-
-        return render_template(
-            "index.html",
-            symptoms=symptoms,
-            username=session["username"],
-            error="Please select at least one symptom."
-        )
-
-    # Prepare input for machine learning model
-    input_data = pd.DataFrame(
-        [[1 if symptom in selected_symptoms else 0
-          for symptom in symptoms]],
-        columns=symptoms
+    st.write(
+        "Select your symptoms below to get a machine-learning-based "
+        "disease prediction."
     )
 
-    # Predict disease
-    prediction = model.predict(input_data)
-
-    disease = prediction[0]
-
-    # Get detailed disease information
-    disease_details = get_disease_info(disease)
-
-    # Save prediction in database
-    conn = get_db()
-
-    conn.execute(
-        """
-        INSERT INTO history (user_id, symptoms, disease, date)
-        VALUES (?, ?, ?, ?)
-        """,
-        (
-            session["user_id"],
-            ", ".join(selected_symptoms),
-            disease,
-            datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-        )
+    st.info(
+        "Select all symptoms that apply. You can search for symptoms "
+        "inside the selection box."
     )
 
-    conn.commit()
-    conn.close()
-
-    # Display prediction and disease information
-    return render_template(
-        "index.html",
-        symptoms=symptoms,
-        username=session["username"],
-        prediction=disease,
-        disease_info=disease_details
+    selected_symptoms = st.multiselect(
+        "Search and select your symptoms",
+        options=symptoms,
+        help="Type a symptom name to search for it."
     )
 
+    if st.button("Predict Disease", type="primary"):
 
-# Prediction history
-@app.route("/history")
-@login_required
-def history():
+        if not selected_symptoms:
+            st.warning("Please select at least one symptom.")
+
+        else:
+            # Convert selected symptoms into model input.
+            input_data = pd.DataFrame(
+                [[
+                    1 if symptom in selected_symptoms else 0
+                    for symptom in symptoms
+                ]],
+                columns=symptoms
+            )
+
+            try:
+                prediction = model.predict(input_data)[0]
+                disease = str(prediction).strip()
+
+                st.success("Prediction completed!")
+
+                st.subheader("Predicted Disease")
+                st.markdown(f"## 🩺 {disease}")
+
+                # Display prediction probabilities.
+                if hasattr(model, "predict_proba"):
+                    probabilities = model.predict_proba(input_data)[0]
+                    classes = model.classes_
+
+                    results = sorted(
+                        zip(classes, probabilities),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )[:3]
+
+                    st.subheader("Top 3 Predictions")
+
+                    for disease_name, probability in results:
+                        st.write(
+                            f"**{str(disease_name).strip()}** — "
+                            f"{probability * 100:.2f}%"
+                        )
+
+                        st.progress(float(probability))
+
+                # Display disease information.
+                st.divider()
+                st.subheader("📖 Disease Information")
+
+                info = get_disease_info(disease)
+
+                if info:
+                    sections = {
+                        "overview": "Overview",
+                        "causes": "Causes",
+                        "symptoms": "Symptoms",
+                        "risk_factors": "Risk Factors",
+                        "precautions": "Precautions",
+                        "prevention": "Prevention",
+                        "doctor": "When to Consult a Doctor"
+                    }
+
+                    for key, heading in sections.items():
+                        if info.get(key):
+                            with st.expander(heading, expanded=(key == "overview")):
+                                st.write(info[key])
+
+                else:
+                    st.warning(
+                        "Detailed information is not available "
+                        "for this disease yet."
+                    )
+
+                # Save prediction history.
+                conn = get_db()
+
+                conn.execute(
+                    """
+                    INSERT INTO history
+                    (user_id, symptoms, disease, date)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        st.session_state.user_id,
+                        ", ".join(selected_symptoms),
+                        disease,
+                        datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+                    )
+                )
+
+                conn.commit()
+                conn.close()
+
+                st.success("Prediction saved in your history.")
+
+                st.warning(
+                    "Disclaimer: This project is for educational purposes "
+                    "only. Predictions are not medical diagnoses. "
+                    "Consult a qualified healthcare professional."
+                )
+
+            except Exception as e:
+                st.error("Prediction failed.")
+                st.write(str(e))
+
+
+# ---------------- PREDICTION HISTORY ----------------
+
+def history_page():
+    st.title("📋 My Prediction History")
 
     conn = get_db()
 
@@ -252,17 +342,80 @@ def history():
         WHERE user_id = ?
         ORDER BY id DESC
         """,
-        (session["user_id"],)
+        (st.session_state.user_id,)
     ).fetchall()
 
     conn.close()
 
-    return render_template(
-        "history.html",
-        records=records
-    )
+    if records:
+        history_df = pd.DataFrame(
+            [dict(record) for record in records]
+        )
+
+        history_df.columns = [
+            "Symptoms",
+            "Predicted Disease",
+            "Date"
+        ]
+
+        st.dataframe(
+            history_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+        st.info("You have not made any predictions yet.")
 
 
-# Run Flask application
+# ---------------- MAIN APPLICATION ----------------
+
+def main():
+
+    if st.session_state.user_id is None:
+
+        st.title("🩺 Disease Prediction Using Machine Learning")
+
+        st.write(
+            "Welcome! Register or log in to predict diseases "
+            "based on selected symptoms."
+        )
+
+        choice = st.radio(
+            "Choose an option",
+            ["Login", "Register"],
+            horizontal=True
+        )
+
+        if choice == "Login":
+            login_user()
+        else:
+            register_user()
+
+    else:
+
+        st.sidebar.title("Disease Prediction System")
+
+        st.sidebar.write(
+            f"Welcome, **{st.session_state.username}**!"
+        )
+
+        page = st.sidebar.radio(
+            "Navigation",
+            ["Disease Prediction", "Prediction History"]
+        )
+
+        if st.sidebar.button("Logout"):
+            st.session_state.user_id = None
+            st.session_state.username = None
+            st.rerun()
+
+        if page == "Disease Prediction":
+            prediction_page()
+
+        elif page == "Prediction History":
+            history_page()
+
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    main()
